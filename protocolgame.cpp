@@ -581,7 +581,7 @@ void ProtocolGame::GetTileDescription(const Tile* tile, NetworkMessage& msg)
 
 	const CreatureVector* creatures = tile->getCreatures();
 	if (creatures) {
-		for (auto it = creatures->rbegin(), end = creatures->rend(); it != end; ++it) {
+		for (auto it = creatures->rbegin(), end = creatures->rend(); (it != end && count < 10); ++it) {
 			const Creature* creature = (*it);
 			if (!player->canSeeCreature(creature)) {
 				continue;
@@ -1520,19 +1520,14 @@ void ProtocolGame::sendCloseContainer(uint8_t cid)
 
 void ProtocolGame::sendCreatureTurn(const Creature* creature, uint32_t stackPos)
 {
-	if (!canSee(creature)) {
+	if (!canSee(creature) || stackPos >= 10) {
 		return;
 	}
 
 	NetworkMessage msg;
 	msg.addByte(0x6B);
-	if (stackPos >= 10) {
-		msg.add<uint16_t>(0xFFFF);
-		msg.add<uint32_t>(creature->getID());
-	} else {
-		msg.addPosition(creature->getPosition());
-		msg.addByte(stackPos);
-	}
+	msg.addPosition(creature->getPosition());
+	msg.addByte(stackPos);
 
 	msg.add<uint16_t>(0x63);
 	msg.add<uint32_t>(creature->getID());
@@ -1751,7 +1746,7 @@ void ProtocolGame::sendRemoveTileThing(const Position& pos, uint32_t stackpos)
 
 void ProtocolGame::sendUpdateTileCreature(const Position& pos, uint32_t stackpos, const Creature* creature)
 {
-	if (!canSee(pos)) {
+	if (!canSee(pos) || stackpos >= 10) {
 		return;
 	}
 
@@ -1770,22 +1765,13 @@ void ProtocolGame::sendUpdateTileCreature(const Position& pos, uint32_t stackpos
 
 void ProtocolGame::sendRemoveTileCreature(const Creature* creature, const Position& pos, uint32_t stackpos)
 {
-	if (stackpos < 10) {
-		if (!canSee(pos)) {
-			return;
-		}
-
-		NetworkMessage msg;
-		RemoveTileThing(msg, pos, stackpos);
-		writeToOutputBuffer(msg);
+	if (!canSee(pos) || stackpos >= 10) {
 		return;
 	}
-
 	NetworkMessage msg;
-	msg.addByte(0x6C);
-	msg.add<uint16_t>(0xFFFF);
-	msg.add<uint32_t>(creature->getID());
+	RemoveTileThing(msg, pos, stackpos);
 	writeToOutputBuffer(msg);
+	return;
 }
 
 void ProtocolGame::sendUpdateTile(const Tile* tile, const Position& pos)
@@ -1837,6 +1823,7 @@ void ProtocolGame::sendAddCreature(const Creature* creature, const Position& pos
 			// @todo: should we avoid this check?
 			if (const Tile* tile = creature->getTile()) {
 				sendUpdateTile(tile, pos);
+				return;
 			}
 		} else {
 			// if stackpos is -1, the client will automatically detect it
@@ -1905,7 +1892,13 @@ void ProtocolGame::sendAddCreature(const Creature* creature, const Position& pos
 void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& newPos, int32_t newStackPos, const Position& oldPos, int32_t oldStackPos, bool teleport)
 {
 	if (creature == player) {
-		if (teleport) {
+		if (oldStackPos >= 10) {
+			//sendRemoveTileThing(oldPos, oldStackPos);
+			sendMapDescription(newPos);
+			//you cannot send add creature to the player
+			//sendAddCreature(creature, newPos, newStackPos, false);
+		}
+		else if (teleport) {
 			sendRemoveTileCreature(creature, oldPos, oldStackPos);
 			sendMapDescription(newPos);
 		} else {
@@ -1914,13 +1907,8 @@ void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& ne
 				RemoveTileCreature(msg, creature, oldPos, oldStackPos);
 			} else {
 				msg.addByte(0x6D);
-				if (oldStackPos < 10) {
-					msg.addPosition(oldPos);
-					msg.addByte(oldStackPos);
-				} else {
-					msg.add<uint16_t>(0xFFFF);
-					msg.add<uint32_t>(creature->getID());
-				}
+				msg.addPosition(oldPos);
+				msg.addByte(oldStackPos);
 				msg.addPosition(newPos);
 			}
 
@@ -1948,7 +1936,10 @@ void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& ne
 			writeToOutputBuffer(msg);
 		}
 	} else if (canSee(oldPos) && canSee(creature->getPosition())) {
-		if (teleport || (oldPos.z == 7 && newPos.z >= 8)) {
+		if (oldStackPos >= 10) {
+			sendAddCreature(creature, newPos, newStackPos, false);
+		}
+		else if (teleport || (oldPos.z == 7 && newPos.z >= 8)) {
 			sendRemoveTileCreature(creature, oldPos, oldStackPos);
 			sendAddCreature(creature, newPos, newStackPos, false);
 		} else {
@@ -1964,9 +1955,9 @@ void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& ne
 			msg.addPosition(creature->getPosition());
 			writeToOutputBuffer(msg);
 		}
-	} else if (canSee(oldPos)) {
+	} else if (canSee(oldPos) && oldStackPos < 10) {
 		sendRemoveTileCreature(creature, oldPos, oldStackPos);
-	} else if (canSee(creature->getPosition())) {
+	} else if (canSee(creature->getPosition()) && newStackPos < 10) {
 		sendAddCreature(creature, newPos, newStackPos, false);
 	}
 }
@@ -2295,10 +2286,6 @@ void ProtocolGame::RemoveTileCreature(NetworkMessage& msg, const Creature* creat
 		RemoveTileThing(msg, pos, stackpos);
 		return;
 	}
-
-	msg.addByte(0x6C);
-	msg.add<uint16_t>(0xFFFF);
-	msg.add<uint32_t>(creature->getID());
 }
 
 void ProtocolGame::MoveUpCreature(NetworkMessage& msg, const Creature* creature, const Position& newPos, const Position& oldPos)
