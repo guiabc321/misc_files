@@ -1893,9 +1893,9 @@ void ProtocolGame::sendMoveCreature(const Creature* creature, const Position& ne
 {
 	if (creature == player) {
 		if (oldStackPos >= 10) {
+			//maybe need a upgrade here.
 			//sendRemoveTileThing(oldPos, oldStackPos);
 			sendMapDescription(newPos);
-			//you cannot send add creature to the player
 			//sendAddCreature(creature, newPos, newStackPos, false);
 		}
 		else if (teleport) {
